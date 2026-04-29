@@ -1,0 +1,9 @@
+.venv/
+.codex
+imgui.ini
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.taichi_cache/
+lab2_log.txt
+lab2_*.zip
