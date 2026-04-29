@@ -44,6 +44,11 @@ class FlipFluid3D:
         self.cell_type = ti.field(dtype=ti.i32, shape=(self.n, self.n, self.n))
         self.pressure = ti.field(dtype=ti.f32, shape=(self.n, self.n, self.n))
         self.density = ti.field(dtype=ti.f32, shape=(self.n, self.n, self.n))
+        self.particle_cell_count = ti.field(dtype=ti.i32, shape=(self.n, self.n, self.n))
+        self.particle_cell_ids = ti.field(
+            dtype=ti.i32,
+            shape=(self.n, self.n, self.n, cfg.PARTICLE_HASH_CAPACITY),
+        )
 
         self.obstacle_pos = ti.Vector.field(3, dtype=ti.f32, shape=())
         self.obstacle_vel = ti.Vector.field(3, dtype=ti.f32, shape=())
@@ -64,6 +69,9 @@ class FlipFluid3D:
     def step(self, dt: float, flip_ratio: float, color_mode: int) -> None:
         self.integrate_particles(dt)
         self.handle_particle_collisions()
+        for _ in range(cfg.PARTICLE_PUSH_ITERS):
+            self.push_particles_apart()
+            self.handle_particle_collisions()
         self.clear_grid()
         self.transfer_to_grid()
         self.enforce_solid_faces()
@@ -169,7 +177,41 @@ class FlipFluid3D:
         for i, j, k in self.cell_type:
             self.pressure[i, j, k] = 0.0
             self.density[i, j, k] = 0.0
+            self.particle_cell_count[i, j, k] = 0
             self.cell_type[i, j, k] = self.initial_cell_type(i, j, k)
+
+    @ti.kernel
+    def push_particles_apart(self):
+        for i, j, k in self.particle_cell_count:
+            self.particle_cell_count[i, j, k] = 0
+        for p in self.p_pos:
+            cell = self.world_to_cell(self.p_pos[p])
+            slot = ti.atomic_add(self.particle_cell_count[cell], 1)
+            if slot < cfg.PARTICLE_HASH_CAPACITY:
+                self.particle_cell_ids[cell.x, cell.y, cell.z, slot] = p
+
+        min_dist = cfg.PARTICLE_SEPARATION
+        min_dist2 = min_dist * min_dist
+        for p in self.p_pos:
+            pos = self.p_pos[p]
+            cell = self.world_to_cell(pos)
+            correction = ti.Vector([0.0, 0.0, 0.0])
+            count = 0
+            for ox, oy, oz in ti.static(ti.ndrange((-1, 2), (-1, 2), (-1, 2))):
+                c = cell + ti.Vector([ox, oy, oz])
+                if 0 <= c.x < self.n and 0 <= c.y < self.n and 0 <= c.z < self.n:
+                    limit = ti.min(self.particle_cell_count[c], cfg.PARTICLE_HASH_CAPACITY)
+                    for q_slot in range(limit):
+                        q = self.particle_cell_ids[c.x, c.y, c.z, q_slot]
+                        if q != p:
+                            d = pos - self.p_pos[q]
+                            dist2 = d.dot(d)
+                            if 1.0e-10 < dist2 < min_dist2:
+                                dist = ti.sqrt(dist2)
+                                correction += d / dist * (min_dist - dist) * 0.45
+                                count += 1
+            if count > 0:
+                self.p_pos[p] += correction / ti.cast(count, ti.f32)
 
     @ti.kernel
     def transfer_to_grid(self):
