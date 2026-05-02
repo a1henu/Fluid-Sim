@@ -5,5 +5,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .taichi_cache/
+.DS_Store
 lab2_log.txt
 lab2_*.zip
