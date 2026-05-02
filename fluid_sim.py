@@ -95,14 +95,14 @@ class FlipFluid3D:
 
     @ti.kernel
     def reset_particles(self, shape_mode: ti.i32):
-        start = ti.Vector([0.12, 0.09, 0.18])
+        start = ti.Vector([0.10, 0.085, 0.16])
         spacing = cfg.PARTICLE_SEPARATION
         for p in self.p_pos:
             pos = self.cube_particle_pos(p, start, spacing)
             if shape_mode == cfg.INIT_SHAPE_SPHERE:
                 pos = self.random_ellipsoid(
-                    ti.Vector([0.34, 0.26, 0.48]),
-                    ti.Vector([0.145, 0.145, 0.145]),
+                    ti.Vector([0.35, 0.28, 0.48]),
+                    ti.Vector([0.170, 0.170, 0.170]),
                 )
             elif shape_mode == cfg.INIT_SHAPE_HEART:
                 pos = self.random_heart()
@@ -156,11 +156,11 @@ class FlipFluid3D:
             - 2.0 * ti.cos(3.0 * theta)
             - ti.cos(4.0 * theta)
         )
-        thickness = 0.075 * (1.0 - 0.35 * fill)
+        thickness = 0.090 * (1.0 - 0.35 * fill)
         return ti.Vector(
             [
-                0.36 + x * 0.009 * fill,
-                0.31 + (y + 2.0) * 0.009 * fill,
+                0.36 + x * 0.0102 * fill,
+                0.32 + (y + 2.0) * 0.0102 * fill,
                 0.50 + (ti.random() * 2.0 - 1.0) * thickness,
             ]
         )
@@ -170,32 +170,32 @@ class FlipFluid3D:
         bucket = p % 100
         pos = self.random_ellipsoid(
             ti.Vector([0.35, 0.22, 0.50]),
-            ti.Vector([0.135, 0.105, 0.085]),
+            ti.Vector([0.155, 0.120, 0.100]),
         )
         if 42 <= bucket < 64:
             pos = self.random_ellipsoid(
                 ti.Vector([0.47, 0.32, 0.50]),
-                ti.Vector([0.075, 0.070, 0.065]),
+                ti.Vector([0.088, 0.082, 0.076]),
             )
         elif 64 <= bucket < 76:
             pos = self.random_ellipsoid(
                 ti.Vector([0.50, 0.44, 0.455]),
-                ti.Vector([0.030, 0.115, 0.026]),
+                ti.Vector([0.035, 0.135, 0.030]),
             )
         elif 76 <= bucket < 88:
             pos = self.random_ellipsoid(
                 ti.Vector([0.50, 0.44, 0.545]),
-                ti.Vector([0.030, 0.115, 0.026]),
+                ti.Vector([0.035, 0.135, 0.030]),
             )
         elif 88 <= bucket < 95:
             pos = self.random_ellipsoid(
                 ti.Vector([0.25, 0.17, 0.50]),
-                ti.Vector([0.055, 0.045, 0.070]),
+                ti.Vector([0.065, 0.052, 0.082]),
             )
         elif bucket >= 95:
             pos = self.random_ellipsoid(
                 ti.Vector([0.21, 0.27, 0.50]),
-                ti.Vector([0.040, 0.040, 0.040]),
+                ti.Vector([0.047, 0.047, 0.047]),
             )
         return pos
 
