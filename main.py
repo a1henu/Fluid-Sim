@@ -16,6 +16,13 @@ COLOR_NAMES = {
     COLOR_PRESSURE: "pressure",
 }
 
+SHAPE_NAMES = {
+    cfg.INIT_SHAPE_CUBE: "cube",
+    cfg.INIT_SHAPE_SPHERE: "sphere",
+    cfg.INIT_SHAPE_HEART: "heart",
+    cfg.INIT_SHAPE_BUNNY: "bunny",
+}
+
 
 def init_taichi() -> None:
     try:
@@ -46,7 +53,8 @@ def camera_pos(yaw: float, pitch: float, distance: float) -> tuple[float, float,
 
 def main() -> None:
     init_taichi()
-    sim = FlipFluid3D()
+    shape_mode = cfg.INITIAL_SHAPE
+    sim = FlipFluid3D(shape_mode)
 
     window = ti.ui.Window(
         "Lab 2 - 3D FLIP/PIC Fluid",
@@ -75,7 +83,13 @@ def main() -> None:
             if event.key == ti.ui.ESCAPE:
                 window.running = False
             elif event.key == "r":
-                sim.reset()
+                sim.reset(shape_mode)
+                started = False
+                paused = True
+                last_obstacle = sim.obstacle_numpy()
+            elif event.key == "v":
+                shape_mode = (shape_mode + 1) % cfg.INIT_SHAPE_COUNT
+                sim.reset(shape_mode)
                 started = False
                 paused = True
                 last_obstacle = sim.obstacle_numpy()
@@ -114,7 +128,7 @@ def main() -> None:
 
         if window.is_pressed(ti.ui.LMB):
             x, y, z = screen_to_obstacle(cursor)
-            frame_dt = dt * cfg.SUBSTEPS
+            frame_dt = dt
             vx = (x - last_obstacle[0]) / max(frame_dt, 1.0e-6)
             vy = (y - last_obstacle[1]) / max(frame_dt, 1.0e-6)
             vz = (z - last_obstacle[2]) / max(frame_dt, 1.0e-6)
@@ -142,9 +156,10 @@ def main() -> None:
         scene.particles(sim.obstacle_render_pos, radius=cfg.OBSTACLE_RADIUS, color=(0.95, 0.95, 0.88))
         canvas.scene(scene)
 
-        window.GUI.begin("3D FLIP Fluid", 0.015, 0.015, 0.32, 0.29)
+        window.GUI.begin("3D FLIP Fluid", 0.015, 0.015, 0.32, 0.32)
         window.GUI.text(f"dt: {dt:.5f}  ([ / ])")
         window.GUI.text(f"flipRatio: {flip_ratio:.2f}  (, / . or 1/2/3)")
+        window.GUI.text(f"shape: {SHAPE_NAMES[shape_mode]}  (V)")
         window.GUI.text(f"color: {COLOR_NAMES[color_mode]}  (C)")
         window.GUI.text(f"avg divergence: {sim.avg_divergence_numpy():.5f}")
         if not started:

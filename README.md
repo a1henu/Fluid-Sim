@@ -31,6 +31,7 @@ The demo starts paused so the spherical obstacle can be placed before simulation
 - `1`: PIC, `flipRatio = 0`
 - `2`: FLIP95, `flipRatio = 0.95`
 - `3`: FLIP, `flipRatio = 1`
+- `V`: cycle initial water shape: cube / sphere / heart / bunny, then reset
 - `C`: switch particle coloring by speed / density / pressure
 - `R`: reset
 

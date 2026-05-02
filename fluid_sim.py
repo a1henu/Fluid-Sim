@@ -16,10 +16,11 @@ COLOR_PRESSURE = cfg.COLOR_PRESSURE
 
 @ti.data_oriented
 class FlipFluid3D:
-    def __init__(self) -> None:
+    def __init__(self, shape_mode: int = cfg.INITIAL_SHAPE) -> None:
         self.n = cfg.GRID_RES
         self.h = cfg.DOMAIN_SIZE / cfg.GRID_RES
         self.inv_h = 1.0 / self.h
+        self.shape_mode = shape_mode
         self.particle_count = (
             cfg.PARTICLES_X
             * cfg.PARTICLES_Y
@@ -59,8 +60,10 @@ class FlipFluid3D:
 
         self.reset()
 
-    def reset(self) -> None:
-        self.reset_particles()
+    def reset(self, shape_mode: int | None = None) -> None:
+        if shape_mode is not None:
+            self.shape_mode = shape_mode
+        self.reset_particles(self.shape_mode)
         self.set_obstacle(*cfg.OBSTACLE_INITIAL, 0.0, 0.0, 0.0)
         self.update_box_edges()
         self.update_obstacle_render()
@@ -91,29 +94,110 @@ class FlipFluid3D:
         return float(self.avg_divergence.to_numpy())
 
     @ti.kernel
-    def reset_particles(self):
-        start = ti.Vector([0.13, 0.10, 0.20])
+    def reset_particles(self, shape_mode: ti.i32):
+        start = ti.Vector([0.12, 0.09, 0.18])
         spacing = cfg.PARTICLE_SEPARATION
         for p in self.p_pos:
-            local = p // cfg.PARTICLES_PER_CELL
-            duplicate = p % cfg.PARTICLES_PER_CELL
-            ix = local % cfg.PARTICLES_X
-            iy = (local // cfg.PARTICLES_X) % cfg.PARTICLES_Y
-            iz = local // (cfg.PARTICLES_X * cfg.PARTICLES_Y)
-            stagger = ti.Vector(
-                [
-                    0.5 * ti.cast(iy % 2, ti.f32),
-                    0.0,
-                    0.5 * ti.cast((ix + iy) % 2, ti.f32),
-                ]
-            )
-            jitter = ti.Vector([ti.random() - 0.5, ti.random() - 0.5, ti.random() - 0.5])
-            jitter *= spacing * 0.22
-            offset = (ti.Vector([ix, iy, iz]) + stagger) * spacing
-            offset += ti.cast(duplicate, ti.f32) * ti.Vector([0.23, 0.17, 0.31]) * spacing
-            self.p_pos[p] = start + offset + jitter
+            pos = self.cube_particle_pos(p, start, spacing)
+            if shape_mode == cfg.INIT_SHAPE_SPHERE:
+                pos = self.random_ellipsoid(
+                    ti.Vector([0.34, 0.26, 0.48]),
+                    ti.Vector([0.145, 0.145, 0.145]),
+                )
+            elif shape_mode == cfg.INIT_SHAPE_HEART:
+                pos = self.random_heart()
+            elif shape_mode == cfg.INIT_SHAPE_BUNNY:
+                pos = self.random_bunny(p)
+            self.p_pos[p] = pos
             self.p_vel[p] = ti.Vector([0.0, 0.0, 0.0])
             self.p_color[p] = ti.Vector([0.05, 0.48, 1.0])
+
+    @ti.func
+    def cube_particle_pos(self, p, start, spacing):
+        local = p // cfg.PARTICLES_PER_CELL
+        duplicate = p % cfg.PARTICLES_PER_CELL
+        ix = local % cfg.PARTICLES_X
+        iy = (local // cfg.PARTICLES_X) % cfg.PARTICLES_Y
+        iz = local // (cfg.PARTICLES_X * cfg.PARTICLES_Y)
+        stagger = ti.Vector(
+            [
+                0.5 * ti.cast(iy % 2, ti.f32),
+                0.0,
+                0.5 * ti.cast((ix + iy) % 2, ti.f32),
+            ]
+        )
+        jitter = ti.Vector([ti.random() - 0.5, ti.random() - 0.5, ti.random() - 0.5])
+        jitter *= spacing * 0.22
+        offset = (ti.Vector([ix, iy, iz]) + stagger) * spacing
+        offset += ti.cast(duplicate, ti.f32) * ti.Vector([0.23, 0.17, 0.31]) * spacing
+        return start + offset + jitter
+
+    @ti.func
+    def random_ellipsoid(self, center, radii):
+        direction = ti.Vector(
+            [ti.random() * 2.0 - 1.0, ti.random() * 2.0 - 1.0, ti.random() * 2.0 - 1.0]
+        )
+        length = direction.norm()
+        if length < 1.0e-5:
+            direction = ti.Vector([1.0, 0.0, 0.0])
+            length = 1.0
+        radius = ti.pow(ti.random(), 1.0 / 3.0)
+        return center + direction / length * radii * radius
+
+    @ti.func
+    def random_heart(self):
+        theta = ti.random() * 6.28318530718
+        fill = ti.sqrt(ti.random())
+        s = ti.sin(theta)
+        x = 16.0 * s * s * s
+        y = (
+            13.0 * ti.cos(theta)
+            - 5.0 * ti.cos(2.0 * theta)
+            - 2.0 * ti.cos(3.0 * theta)
+            - ti.cos(4.0 * theta)
+        )
+        thickness = 0.075 * (1.0 - 0.35 * fill)
+        return ti.Vector(
+            [
+                0.36 + x * 0.009 * fill,
+                0.31 + (y + 2.0) * 0.009 * fill,
+                0.50 + (ti.random() * 2.0 - 1.0) * thickness,
+            ]
+        )
+
+    @ti.func
+    def random_bunny(self, p):
+        bucket = p % 100
+        pos = self.random_ellipsoid(
+            ti.Vector([0.35, 0.22, 0.50]),
+            ti.Vector([0.135, 0.105, 0.085]),
+        )
+        if 42 <= bucket < 64:
+            pos = self.random_ellipsoid(
+                ti.Vector([0.47, 0.32, 0.50]),
+                ti.Vector([0.075, 0.070, 0.065]),
+            )
+        elif 64 <= bucket < 76:
+            pos = self.random_ellipsoid(
+                ti.Vector([0.50, 0.44, 0.455]),
+                ti.Vector([0.030, 0.115, 0.026]),
+            )
+        elif 76 <= bucket < 88:
+            pos = self.random_ellipsoid(
+                ti.Vector([0.50, 0.44, 0.545]),
+                ti.Vector([0.030, 0.115, 0.026]),
+            )
+        elif 88 <= bucket < 95:
+            pos = self.random_ellipsoid(
+                ti.Vector([0.25, 0.17, 0.50]),
+                ti.Vector([0.055, 0.045, 0.070]),
+            )
+        elif bucket >= 95:
+            pos = self.random_ellipsoid(
+                ti.Vector([0.21, 0.27, 0.50]),
+                ti.Vector([0.040, 0.040, 0.040]),
+            )
+        return pos
 
     @ti.kernel
     def set_obstacle(
@@ -245,13 +329,14 @@ class FlipFluid3D:
 
     def solve_incompressibility(self, iterations: int, over_relaxation: float) -> None:
         for _ in range(iterations):
-            self.pressure_iteration(over_relaxation)
+            self.pressure_iteration(over_relaxation, 0)
+            self.pressure_iteration(over_relaxation, 1)
         self.enforce_solid_faces()
 
     @ti.kernel
-    def pressure_iteration(self, over_relaxation: ti.f32):
+    def pressure_iteration(self, over_relaxation: ti.f32, parity: ti.i32):
         for i, j, k in self.cell_type:
-            if self.cell_type[i, j, k] == FLUID:
+            if self.cell_type[i, j, k] == FLUID and (i + j + k) % 2 == parity:
                 sx0 = self.open_cell(i - 1, j, k)
                 sx1 = self.open_cell(i + 1, j, k)
                 sy0 = self.open_cell(i, j - 1, k)
@@ -364,17 +449,17 @@ class FlipFluid3D:
             left = i == 0 or self.cell_type[i - 1, j, k] == SOLID
             right = i == self.n or self.cell_type[i, j, k] == SOLID
             if left or right:
-                self.u[i, j, k] = 0.0
+                self.u[i, j, k] = self.solid_face_velocity(i, j, k, 0)
         for i, j, k in self.v:
             down = j == 0 or self.cell_type[i, j - 1, k] == SOLID
             up = j == self.n or self.cell_type[i, j, k] == SOLID
             if down or up:
-                self.v[i, j, k] = 0.0
+                self.v[i, j, k] = self.solid_face_velocity(i, j, k, 1)
         for i, j, k in self.w:
             back = k == 0 or self.cell_type[i, j, k - 1] == SOLID
             front = k == self.n or self.cell_type[i, j, k] == SOLID
             if back or front:
-                self.w[i, j, k] = 0.0
+                self.w[i, j, k] = self.solid_face_velocity(i, j, k, 2)
 
     @ti.func
     def initial_cell_type(self, i, j, k):
@@ -396,6 +481,24 @@ class FlipFluid3D:
         if 0 <= i < self.n and 0 <= j < self.n and 0 <= k < self.n:
             if self.cell_type[i, j, k] != SOLID:
                 value = 1.0
+        return value
+
+    @ti.func
+    def solid_face_velocity(self, i, j, k, component: ti.template()):
+        pos = ti.Vector([0.0, 0.0, 0.0])
+        value = 0.0
+        if component == 0:
+            pos = ti.Vector([ti.cast(i, ti.f32), ti.cast(j, ti.f32) + 0.5, ti.cast(k, ti.f32) + 0.5]) * self.h
+            value = self.obstacle_vel[None].x
+        elif component == 1:
+            pos = ti.Vector([ti.cast(i, ti.f32) + 0.5, ti.cast(j, ti.f32), ti.cast(k, ti.f32) + 0.5]) * self.h
+            value = self.obstacle_vel[None].y
+        else:
+            pos = ti.Vector([ti.cast(i, ti.f32) + 0.5, ti.cast(j, ti.f32) + 0.5, ti.cast(k, ti.f32)]) * self.h
+            value = self.obstacle_vel[None].z
+
+        if (pos - self.obstacle_pos[None]).norm() > cfg.OBSTACLE_RADIUS + 0.5 * self.h:
+            value = 0.0
         return value
 
     @ti.func

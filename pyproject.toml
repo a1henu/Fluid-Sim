@@ -1,7 +1,7 @@
 [project]
 name = "fluid-sim"
 version = "0.1.0"
-description = "Taichi 2D PIC/FLIP fluid simulation for Lab 2"
+description = "Taichi 3D PIC/FLIP fluid simulation for Lab 2"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
