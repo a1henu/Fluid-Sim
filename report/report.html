@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Lab 2 FLIP Fluid Simulation 实验报告</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans CJK SC", sans-serif; max-width: 980px; margin: 32px auto; line-height: 1.65; color: #1d2733; padding: 0 24px; }
+h1, h2, h3 { color: #102033; }
+pre { background: #111827; color: #e5e7eb; padding: 14px 16px; border-radius: 8px; overflow: auto; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+img { max-width: 100%; border: 1px solid #d8dee9; border-radius: 8px; display: block; margin: 10px 0 28px; }
+</style>
+</head>
+<body>
+<h1>Lab 2 FLIP Fluid Simulation 实验报告</h1>
+<h2>Lab核心实现思路</h2>
+<p>每一帧仿真按照 handout 中建议的流程组织：</p>
+<pre><code class="language-text">integrate particles
+handle particle collisions
+push particles apart
+transfer particle velocities to grid
+solve incompressibility
+transfer grid velocities back to particles
+update visualization colors
+</code></pre>
+<p>粒子积分阶段对粒子速度加入重力，再用显式欧拉更新位置。之后进行容器边界和球形障碍物碰撞处理，保证粒子不会穿出容器或进入障碍物内部。</p>
+<p>粒子到网格的传输使用 MAC 交错网格，分别在 <code>u/v/w</code> 三组 face-centered velocity field 上进行三线性 splat。每个粒子根据自身位置把速度贡献到附近 8 个速度采样点，并使用权重归一化得到网格速度。</p>
+<p>不可压缩求解在网格上进行。程序标记 <code>AIR / FLUID / SOLID</code> 三类 cell，对 FLUID cell 计算速度散度，并用 red-black Gauss-Seidel 迭代修正相邻 face velocity，从而降低散度。相比直接并行更新所有 cell，red-black 分组避免了相邻 cell 同时写同一个 face 带来的数值不稳定。</p>
+<p>网格到粒子的速度回传支持 PIC/FLIP 混合：</p>
+<pre><code class="language-text">v_pic = sample(current_grid_velocity)
+v_flip = old_particle_velocity + sample(current_grid_velocity - old_grid_velocity)
+v_new = (1 - flipRatio) * v_pic + flipRatio * v_flip
+</code></pre>
+<p>因此 <code>flipRatio = 0</code> 时为 PIC，<code>flipRatio = 1</code> 时为 FLIP，默认使用 <code>0.95</code> 作为 FLIP95。</p>
+<h2>稳定性处理</h2>
+<p>为了提高稳定性，项目实现了粒子间距修正。粒子根据所在网格 cell 建立空间哈希，只检查相邻 cell 中的粒子，从而避免全局两两碰撞检测。若粒子距离过近，则沿连线方向做位置修正，减少粒子团聚和局部过密。</p>
+<p>边界方面，容器壁面速度设为 0；球形障碍物既参与粒子碰撞，也在网格 solid face 上提供障碍物速度，使移动障碍物和压力投影阶段的边界条件保持一致。</p>
+<h2>交互与可视化</h2>
+<p>运行方式如下：</p>
+<pre><code class="language-bash">uv sync
+uv run python main.py
+</code></pre>
+<p>Demo 使用 Taichi GGUI 渲染 3D 粒子、容器线框和球形障碍物。启动后默认处于暂停状态，可以先用鼠标放置障碍物，再按 <code>Space</code> 开始仿真。支持以下交互：</p>
+<ul>
+<li><code>Space</code>：开始、暂停、继续仿真。</li>
+<li><code>[</code> / <code>]</code>：减小或增大时间步长。</li>
+<li><code>,</code> / <code>.</code>：连续调整 <code>flipRatio</code>。</li>
+<li><code>1</code> / <code>2</code> / <code>3</code>：切换 PIC、FLIP95、FLIP。</li>
+<li><code>C</code>：按速度、密度、压力切换粒子颜色。</li>
+<li><code>V</code>：切换初始水体形状，包括 cube、sphere、heart、bunny。</li>
+<li>鼠标左键：放置球形障碍物。</li>
+<li>鼠标右键：旋转相机。</li>
+<li><code>Q</code> / <code>E</code>：缩放视角。</li>
+<li><code>R</code>：重置当前场景。</li>
+</ul>
+<h2>Demo 结果</h2>
+<p>下面展示四种初始水体形状。每种形状包含两个结果：正常下落，以及下落过程中碰到球形障碍物。</p>
+<h3>Cube</h3>
+<p>正常下落：</p>
+<p><img alt="cube normal" src="results/cube_normal.gif" /></p>
+<p>碰到障碍物：</p>
+<p><img alt="cube obstacle" src="results/cube_obstacle.gif" /></p>
+<h3>Sphere</h3>
+<p>正常下落：</p>
+<p><img alt="sphere normal" src="results/sphere_normal.gif" /></p>
+<p>碰到障碍物：</p>
+<p><img alt="sphere obstacle" src="results/sphere_obstacle.gif" /></p>
+<h3>Heart</h3>
+<p>正常下落：</p>
+<p><img alt="heart normal" src="results/heart_normal.gif" /></p>
+<p>碰到障碍物：</p>
+<p><img alt="heart obstacle" src="results/heart_obstacle.gif" /></p>
+<h3>Bunny</h3>
+<p>正常下落：</p>
+<p><img alt="bunny normal" src="results/bunny_normal.gif" /></p>
+<p>碰到障碍物：</p>
+<p><img alt="bunny obstacle" src="results/bunny_obstacle.gif" /></p>
+</body>
+</html>
